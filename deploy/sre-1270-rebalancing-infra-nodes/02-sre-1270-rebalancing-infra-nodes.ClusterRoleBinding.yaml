@@ -1,0 +1,13 @@
+---
+kind: ClusterRoleBinding
+apiVersion: rbac.authorization.k8s.io/v1
+metadata:
+  name: sre-1270-rebalancing-infra-node
+subjects:
+- kind: ServiceAccount
+  name: sre-1270-rebalancing-infra-nodes
+  namespace: openshift-monitoring
+roleRef:
+  apiGroup: rbac.authorization.k8s.io
+  kind: ClusterRole
+  name: sre-1270-rebalancing-infra-nodes

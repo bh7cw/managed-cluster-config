@@ -10551,6 +10551,205 @@ objects:
       managed.openshift.io/gitHash: ${IMAGE_TAG}
       managed.openshift.io/gitRepoName: ${REPO_NAME}
       managed.openshift.io/osd: 'true'
+    name: sre-1270-rebalancing-infra-nodes
+  spec:
+    clusterDeploymentSelector:
+      matchLabels:
+        api.openshift.com/managed: 'true'
+      matchExpressions:
+      - key: hive.openshift.io/version-major-minor
+        operator: In
+        values:
+        - '4.5'
+    resourceApplyMode: Sync
+    resources:
+    - apiVersion: v1
+      kind: ServiceAccount
+      metadata:
+        name: sre-1270-rebalancing-infra-nodes
+        namespace: openshift-monitoring
+    - apiVersion: rbac.authorization.k8s.io/v1
+      kind: ClusterRole
+      metadata:
+        name: sre-1270-rebalancing-infra-nodes
+      rules:
+      - apiGroups:
+        - ''
+        resources:
+        - nodes
+        verbs:
+        - list
+    - kind: ClusterRoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: sre-1270-rebalancing-infra-node
+      subjects:
+      - kind: ServiceAccount
+        name: sre-1270-rebalancing-infra-nodes
+        namespace: openshift-monitoring
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: ClusterRole
+        name: sre-1270-rebalancing-infra-nodes
+    - apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: sre-1270-rebalancing-infra-nodes-openshift-monitoring
+        namespace: openshift-monitoring
+      rules:
+      - apiGroups:
+        - ''
+        resources:
+        - pods
+        verbs:
+        - get
+        - list
+        - delete
+      - apiGroups:
+        - ''
+        resources:
+        - pvcs
+        verbs:
+        - delete
+    - kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: sre-1270-rebalancing-infra-nodes-openshift-monitoring
+        namespace: openshift-monitoring
+      subjects:
+      - kind: ServiceAccount
+        name: sre-1270-rebalancing-infra-nodes
+        namespace: openshift-monitoring
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: sre-1270-rebalancing-infra-nodes-openshift-monitoring
+        namespace: openshift-monitoring
+    - apiVersion: rbac.authorization.k8s.io/v1
+      kind: Role
+      metadata:
+        name: sre-1270-rebalancing-infra-nodes-openshift-security
+        namespace: openshift-security
+      rules:
+      - apiGroups:
+        - ''
+        resources:
+        - pods
+        verbs:
+        - get
+        - list
+        - delete
+    - kind: RoleBinding
+      apiVersion: rbac.authorization.k8s.io/v1
+      metadata:
+        name: sre-1270-rebalancing-infra-nodes-openshift-security
+        namespace: openshift-security
+      subjects:
+      - kind: ServiceAccount
+        name: sre-1270-rebalancing-infra-nodes
+        namespace: openshift-monitoring
+      roleRef:
+        apiGroup: rbac.authorization.k8s.io
+        kind: Role
+        name: sre-1270-rebalancing-infra-nodes-openshift-security
+        namespace: openshift-security
+    - apiVersion: v1
+      kind: ConfigMap
+      metadata:
+        name: sre-1270-rebalancing-infra-nodes
+        namespace: openshift-monitoring
+      data:
+        entrypoint: "#!/bin/bash\n# This script has been adopt for backplane.\n# https://source.redhat.com/groups/public/openshiftplatformsre/wiki/backplane_user_documentation\n\
+          \necho \"INFO: Attempting infra node pod rebalancing...\"\n\nAZ_COUNT=$(oc\
+          \ get nodes -o yaml | grep -E \"^\\s+failure-domain.beta.kubernetes.io/zone\"\
+          \ | uniq | wc -l)\n\necho \"INFO: Number of AZs ${AZ_COUNT}\"\n\nrebalancePods()\
+          \ {\n    APP=$1\n    NS=$2\n    VOLUME_NAME=$3\n    ALL_POD_NODES=$(oc get\
+          \ pods -n $NS -l app=$APP -o wide --no-headers | awk '{print $7}' | sort\
+          \ | wc -l)\n    UNIQUE_POD_NODES=$(oc get pods -n $NS -l app=$APP -o wide\
+          \ --no-headers | awk '{print $7}' | sort | uniq | wc -l)\n    echo \"INFO:\
+          \ $APP pods needing rebalance: $(( ALL_POD_NODES - UNIQUE_POD_NODES ))\"\
+          \n    LAST_POD_NODE_NAME=\"\"\n    for POD in $( oc get pods -n $NS -l app=$APP\
+          \ -o jsonpath='{.items[*].metadata.name}' ) ; do\n        POD_NODE_NAME=$(oc\
+          \ get pod -n $NS $POD -o json | jq -r .spec.nodeName)\n        if [ \"${POD_NODE_NAME}\"\
+          \ == \"${LAST_POD_NODE_NAME}\" ]; then\n            if [ \"${AZ_COUNT}\"\
+          \ != \"1\" ]; then\n                PVC=$(oc get pod -n $NS $POD -o json\
+          \ | jq -r '.spec.volumes[] | select(.name==\"'$VOLUME_NAME'\") | .persistentVolumeClaim.claimName')\n\
+          \                echo \"INFO: Deleting PVC $PVC\"\n                oc delete\
+          \ pvc --wait=false -n $NS $PVC\n            fi\n            echo \"INFO:\
+          \ Deleting pod $POD\"\n            oc delete pod -n $NS $POD\n        fi\n\
+          \        LAST_POD_NODE_NAME=$POD_NODE_NAME\n    done\n}\n\ncheckPendingPods()\
+          \ {\n    APP=$1\n    NS=$2\n    for POD in $( oc get pods -n $NS -l app=$APP\
+          \ -o jsonpath='{.items[*].metadata.name}' ) ; do\n        POD_STATUS_PHASE=$(oc\
+          \ get pods -n $NS $POD -o json | jq -r .status.phase)\n        if [ \"${POD_STATUS_PHASE}\"\
+          \ == \"Pending\" ]; then\n            echo \"INFO: Deleting pod $POD\"\n\
+          \            oc delete pod -n $NS $POD\n        fi\n    done\n}\n\nwaitRunningPods()\
+          \ {\n    APP=$1\n    NS=$2\n    for POD in $( oc get pods -n $NS -l app=$APP\
+          \ -o jsonpath='{.items[*].metadata.name}' ) ; do\n        echo \"INFO: Waiting\
+          \ for $POD to be Running...\"\n        while [ \"$(oc get pod -n $NS $POD\
+          \ -o jsonpath='{.status.phase}' 2>/dev/null)\" != \"Running\" ];\n     \
+          \   do\n            sleep 1\n        done\n    done\n}\n\necho \"INFO: Rebalancing\
+          \ prometheus pods...\"\nrebalancePods prometheus openshift-monitoring prometheus-data\n\
+          \necho \"INFO: Rebalancing alertmanager pods...\"\nrebalancePods alertmanager\
+          \ openshift-monitoring alertmanager-data\n\necho \"INFO: Restarting prometheus\
+          \ operator...\"\nOPERATOR_POD=$( oc get pod -n openshift-monitoring -l app.kubernetes.io/name=prometheus-operator\
+          \ -o jsonpath='{.items[*].metadata.name}' )\noc delete pod -n openshift-monitoring\
+          \ $OPERATOR_POD\n\necho \"INFO: Check pending prometheus pods...\"\ncheckPendingPods\
+          \ prometheus openshift-monitoring\n\necho \"INFO: Check pending alertmanager\
+          \ pods...\"\ncheckPendingPods alertmanager openshift-monitoring\n\necho\
+          \ \"INFO: Wait for running prometheus pods...\"\nwaitRunningPods prometheus\
+          \ openshift-monitoring\n\necho \"INFO: Wait for running alertmanager pods...\"\
+          \nwaitRunningPods alertmanager openshift-monitoring"
+    - apiVersion: batch/v1beta1
+      kind: CronJob
+      metadata:
+        name: sre-1270-rebalancing-infra-nodes
+        namespace: openshift-monitoring
+      spec:
+        failedJobsHistoryLimit: 3
+        successfulJobsHistoryLimit: 3
+        concurrencyPolicy: Replace
+        schedule: '*/1 * * * *'
+        jobTemplate:
+          spec:
+            template:
+              spec:
+                affinity:
+                  nodeAffinity:
+                    preferredDuringSchedulingIgnoredDuringExecution:
+                    - preference:
+                        matchExpressions:
+                        - key: node-role.kubernetes.io/infra
+                          operator: Exists
+                      weight: 1
+                tolerations:
+                - effect: NoSchedule
+                  key: node-role.kubernetes.io/infra
+                  operator: Exists
+                serviceAccountName: sre-1270-rebalancing-infra-nodes
+                restartPolicy: Never
+                containers:
+                - name: sre-1270-rebalancing-infra-nodes
+                  image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+                  command:
+                  - /bin/sh
+                  - -c
+                  - /etc/config/entrypoint
+                  volumeMounts:
+                  - name: sre-1270-rebalancing-infra-nodes
+                    mountPath: /etc/config
+                    readOnly: true
+                volumes:
+                - name: sre-1270-rebalancing-infra-nodes
+                  configMap:
+                    name: sre-1270-rebalancing-infra-nodes
+                    defaultMode: 493
+- apiVersion: hive.openshift.io/v1
+  kind: SelectorSyncSet
+  metadata:
+    labels:
+      managed.openshift.io/gitHash: ${IMAGE_TAG}
+      managed.openshift.io/gitRepoName: ${REPO_NAME}
+      managed.openshift.io/osd: 'true'
     name: sre-authorization
   spec:
     clusterDeploymentSelector:

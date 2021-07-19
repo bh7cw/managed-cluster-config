@@ -1,0 +1,42 @@
+---
+apiVersion: batch/v1beta1
+kind: CronJob
+metadata:
+  name: sre-1270-rebalancing-infra-nodes
+  namespace: openshift-monitoring
+spec:
+  failedJobsHistoryLimit: 3
+  successfulJobsHistoryLimit: 3
+  concurrencyPolicy: Replace
+  schedule: "*/1 * * * *"
+  jobTemplate:
+    spec:
+      template:
+        spec:
+          affinity:
+            nodeAffinity:
+              preferredDuringSchedulingIgnoredDuringExecution:
+              - preference:
+                  matchExpressions:
+                  - key: node-role.kubernetes.io/infra
+                    operator: Exists
+                weight: 1
+          tolerations:
+            - effect: NoSchedule
+              key: node-role.kubernetes.io/infra
+              operator: Exists
+          serviceAccountName: sre-1270-rebalancing-infra-nodes
+          restartPolicy: Never
+          containers:
+            - name: sre-1270-rebalancing-infra-nodes
+              image: image-registry.openshift-image-registry.svc:5000/openshift/cli:latest
+              command: [ "/bin/sh", "-c", "/etc/config/entrypoint" ]
+              volumeMounts:
+                - name: sre-1270-rebalancing-infra-nodes
+                  mountPath: /etc/config
+                  readOnly: true
+          volumes:
+            - name: sre-1270-rebalancing-infra-nodes
+              configMap:
+                name: sre-1270-rebalancing-infra-nodes
+                defaultMode: 0755
